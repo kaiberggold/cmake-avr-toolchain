@@ -44,8 +44,11 @@
 ##########################################################################
 # options
 ##########################################################################
-option( WITH_MCU "Add the MCU type to the target file name." OFF )
+include(CMakePrintHelpers)
 
+
+option( WITH_MCU "Add the MCU type to the target file name." OFF )
+cmake_print_variables( CMAKE_RUNTIME_OUTPUT_DIRECTORY )
 
 ##########################################################################
 # executables in use
@@ -93,7 +96,6 @@ set( CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY )
 # not added automatically, since CMAKE_SYSTEM_NAME is "generic"
 set( CMAKE_SYSTEM_INCLUDE_PATH "${CMAKE_FIND_ROOT_PATH}/include" )
 set( CMAKE_SYSTEM_LIBRARY_PATH "${CMAKE_FIND_ROOT_PATH}/lib" )
-
 
 ##########################################################################
 # status messages for generating
@@ -176,6 +178,11 @@ if( AVR_UPLOADTOOL MATCHES avrdude )
         set( AVR_UPLOADTOOL_OPTIONS -b${AVR_UPLOAD_SPEED} -D -V -P ${AVR_UPLOADTOOL_PORT} )
         set( AVR_UPLOADTOOL_STATUS_OPTIONS -P ${AVR_UPLOADTOOL_PORT} -n -v )
     endif ( AVR_PROGRAMMER MATCHES usbtiny )
+
+    if ( AVR_PROGRAMMER MATCHES arduino )
+        set( AVR_UPLOADTOOL_OPTIONS -b${AVR_UPLOAD_SPEED} -P ${AVR_UPLOADTOOL_PORT} -D )
+    endif ( AVR_PROGRAMMER MATCHES arduino )
+    
 endif( AVR_UPLOADTOOL MATCHES avrdude )
 
 # Set the awk arguments
@@ -270,6 +277,7 @@ function( add_avr_executable EXECUTABLE_NAME )
 
    # set file names
    set( elf_file ${EXECUTABLE_NAME}${MCU_TYPE_FOR_FILENAME}.elf )
+   cmake_print_variables(elf_file)
    set( hex_file ${EXECUTABLE_NAME}${MCU_TYPE_FOR_FILENAME}.hex )
    set( map_file ${EXECUTABLE_NAME}${MCU_TYPE_FOR_FILENAME}.map )
    set( eeprom_image ${EXECUTABLE_NAME}${MCU_TYPE_FOR_FILENAME}-eeprom.hex )
@@ -290,15 +298,15 @@ function( add_avr_executable EXECUTABLE_NAME )
    )
 
    target_link_libraries(
-        ${elf_file} "-mmcu=${AVR_MCU} -Wl,--gc-sections -mrelax -Wl,-Map,${map_file}"
+        ${elf_file} "-mmcu=${AVR_MCU} -Wl,--gc-sections -mrelax -Wl,-Map,${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${map_file}"
     )
 
    add_custom_command(
       OUTPUT ${hex_file}
       COMMAND
-         ${AVR_OBJCOPY} -j .text -j .data -O ihex ${elf_file} ${hex_file}
+         ${AVR_OBJCOPY} -j .text -j .data -O ihex ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${hex_file}
       COMMAND
-         ${AVR_SIZE_TOOL} ${AVR_SIZE_ARGS} ${elf_file} "|" ${AWK} -f firmwaresize_${EXECUTABLE_NAME}.awk
+         ${AVR_SIZE_TOOL} ${AVR_SIZE_ARGS} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file} "|" ${AWK} -f ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       DEPENDS ${elf_file} firmwaresize_${EXECUTABLE_NAME}.awk
    )
 
@@ -308,7 +316,7 @@ function( add_avr_executable EXECUTABLE_NAME )
       COMMAND
          ${AVR_OBJCOPY} -j .eeprom --set-section-flags=.eeprom=alloc,load
             --change-section-lma .eeprom=0 --no-change-warnings
-            -O ihex ${elf_file} ${eeprom_image}
+            -O ihex ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${eeprom_image}
       DEPENDS ${elf_file}
    )
 
@@ -325,19 +333,26 @@ function( add_avr_executable EXECUTABLE_NAME )
    )
 
    # clean
-   get_directory_property( clean_files ADDITIONAL_MAKE_CLEAN_FILES )
-   set_directory_properties(
-      PROPERTIES
-         ADDITIONAL_MAKE_CLEAN_FILES "${map_file}"
-   )
-
+   #get_directory_property( clean_files ADDITIONAL_CLEAN_FILES )
+   #set_directory_properties(
+   #   PROPERTIES
+   #      ADDITIONAL_CLEAN_FILES set"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${map_file} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk"
+   #)
+   set_property(DIRECTORY PROPERTY ADDITIONAL_CLEAN_FILES
+   "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${map_file}"
+   "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${hex_file}"
+   "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${eeprom_image}"
+   "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file}"
+   "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk")
    # upload - with avrdude
    add_custom_target(
       upload_${EXECUTABLE_NAME}
       ${AVR_UPLOADTOOL} -p ${AVR_MCU} -c ${AVR_PROGRAMMER} ${AVR_UPLOADTOOL_OPTIONS}
          -U flash:w:${hex_file}
       DEPENDS ${hex_file}
-      COMMENT "Uploading ${hex_file} to ${AVR_MCU} using ${AVR_PROGRAMMER}"
+      upload_command=${hex_file}
+   
+      MESSAGE "Uploading ${hex_file} to ${AVR_MCU} using ${upload_command}"
    )
 
    # upload eeprom only - with avrdude
@@ -367,22 +382,22 @@ function( add_avr_executable EXECUTABLE_NAME )
    # size
    add_custom_target(
       size_${EXECUTABLE_NAME}
-         ${AVR_SIZE_TOOL} ${AVR_SIZE_ARGS} ${elf_file}  "|" ${AWK} -f firmwaresize_${EXECUTABLE_NAME}.awk
-      DEPENDS ${elf_file} firmwaresize_${EXECUTABLE_NAME}.awk
+         ${AVR_SIZE_TOOL} ${AVR_SIZE_ARGS} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file}  "|" ${AWK} -f ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
+      DEPENDS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${elf_file} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
    )
 
    add_custom_target(
       firmwaresize_${EXECUTABLE_NAME}.awk
+      COMMAND  
+        echo "BEGIN {ORS=\"\";print \"\\\\n\\\\033[1;33mFirmware size (\"}" > ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       COMMAND
-        echo "BEGIN {ORS=\"\";print \"\\\\n\\\\033[1;33mFirmware size (\"}" > firmwaresize_${EXECUTABLE_NAME}.awk
+        echo "/^Device/ {print \$2 \") is...  \"}" >> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       COMMAND
-        echo "/^Device/ {print \$2 \") is...  \"}" >> firmwaresize_${EXECUTABLE_NAME}.awk
+        echo "/^Program/ {print \"Flash (program): \" \$2 \" \" \$3 \" \" \$4 \")  \"}" >> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       COMMAND
-        echo "/^Program/ {print \"Flash (program): \" \$2 \" \" \$3 \" \" \$4 \")  \"}" >> firmwaresize_${EXECUTABLE_NAME}.awk
+        echo "/^Data/ {print \"RAM\ (globals): \" \$2 \" \" \$3 \" \" \$4 \")  \"}" >> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       COMMAND
-        echo "/^Data/ {print \"RAM\ (globals): \" \$2 \" \" \$3 \" \" \$4 \")  \"}" >> firmwaresize_${EXECUTABLE_NAME}.awk
-      COMMAND
-        echo "END {print \"\\\\033[0m\\\\n\\\\n\"}" >> firmwaresize_${EXECUTABLE_NAME}.awk
+        echo "END {print \"\\\\033[0m\\\\n\\\\n\"}" >> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/firmwaresize_${EXECUTABLE_NAME}.awk
       VERBATIM
    )
 
