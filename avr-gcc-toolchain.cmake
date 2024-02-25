@@ -348,11 +348,9 @@ function( add_avr_executable EXECUTABLE_NAME )
    add_custom_target(
       upload_${EXECUTABLE_NAME}
       ${AVR_UPLOADTOOL} -p ${AVR_MCU} -c ${AVR_PROGRAMMER} ${AVR_UPLOADTOOL_OPTIONS}
-         -U flash:w:${hex_file}
+         -U flash:w:${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${hex_file}
       DEPENDS ${hex_file}
-      upload_command=${hex_file}
-   
-      MESSAGE "Uploading ${hex_file} to ${AVR_MCU} using ${upload_command}"
+      COMMENT "Uploading ${hex_file} to ${AVR_MCU} using ${AVR_PROGRAMMER}"
    )
 
    # upload eeprom only - with avrdude
